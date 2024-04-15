@@ -13,26 +13,26 @@ enum class ETeam
 /**
  * Grid oriented coordinates
  */
-struct FGridCoordinates
+struct FGridCoordinates_Dep
 {
-	FGridCoordinates();
+	FGridCoordinates_Dep();
 	
-	explicit FGridCoordinates(int32 X, int32 Y);
+	explicit FGridCoordinates_Dep(int32 X, int32 Y);
 		
 	int32 GridX = 0;
 	int32 GridY = 0;
 
-	bool operator==(const FGridCoordinates& InCoordinates) const;
+	bool operator==(const FGridCoordinates_Dep& InCoordinates) const;
 
-	FGridCoordinates operator-(const FGridCoordinates& InCoordinates) const;
+	FGridCoordinates_Dep operator-(const FGridCoordinates_Dep& InCoordinates) const;
 
 	// Static helpers / utility
-	static const FGridCoordinates Empty()
+	static const FGridCoordinates_Dep Empty()
 	{
-		return FGridCoordinates{-1, -1};
+		return FGridCoordinates_Dep{-1, -1};
 	};
 
-	static float DistSqr(const FGridCoordinates& InCoordinatesLeft, const FGridCoordinates& InCoordinatesRight)
+	static float DistSqr(const FGridCoordinates_Dep& InCoordinatesLeft, const FGridCoordinates_Dep& InCoordinatesRight)
 	{
 		return FMath::Square(InCoordinatesLeft.GridX - InCoordinatesRight.GridX) + FMath::Square(
 			InCoordinatesLeft.GridY - InCoordinatesRight.GridY);

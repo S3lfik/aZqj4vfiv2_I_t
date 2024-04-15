@@ -9,6 +9,9 @@ AIT_GameActorBase::AIT_GameActorBase()
  	// Set this actor to call Tick() every frame.  You can turn this off to improve performance if you don't need it.
 	PrimaryActorTick.bCanEverTick = true;
 	
+	USceneComponent* SceneComponent = CreateDefaultSubobject<USceneComponent>("Root");
+	RootComponent = SceneComponent;
+	
 	StaticMeshComp = CreateDefaultSubobject<UStaticMeshComponent>(TEXT("Mesh"));
 	StaticMeshComp->SetupAttachment(RootComponent);
 }
@@ -54,7 +57,7 @@ ETeam AIT_GameActorBase::GetTeam() const
 	return Team;
 }
 
-FGridCoordinates AIT_GameActorBase::GetGridCoordinates() const
+FIntPoint AIT_GameActorBase::GetGridCoordinates() const
 {
 	return GridCoordinates;
 }
@@ -67,6 +70,16 @@ void AIT_GameActorBase::SetAttackPower(float InNewAttackPower)
 float AIT_GameActorBase::GetAttackPower() const
 {
 	return AttackPower;
+}
+
+void AIT_GameActorBase::SetAttackRange(int32 InNewAttackRange)
+{
+	AttackRange = InNewAttackRange;
+}
+
+int32 AIT_GameActorBase::GetAttackRange() const
+{
+	return AttackRange;
 }
 
 void AIT_GameActorBase::SetHealthPoints(float InHealthPoints)
@@ -94,7 +107,7 @@ void AIT_GameActorBase::PlayAttack()
 	// TODO: Make it blink
 }
 
-void AIT_GameActorBase::SetGridCoordinates(const FGridCoordinates& InGridCoordinates)
+void AIT_GameActorBase::SetGridCoordinates(const FIntPoint& InGridCoordinates)
 {
 	GridCoordinates = InGridCoordinates;
 }

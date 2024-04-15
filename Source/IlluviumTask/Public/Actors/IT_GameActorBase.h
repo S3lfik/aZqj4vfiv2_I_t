@@ -19,11 +19,14 @@ public:
 	void SetTeam(ETeam InTeam);
 	ETeam GetTeam() const;
 
-	void SetGridCoordinates(const FGridCoordinates& GridCoordinates);
-	FGridCoordinates GetGridCoordinates() const;
+	void SetGridCoordinates(const FIntPoint& GridCoordinates);
+	FIntPoint GetGridCoordinates() const;
 
 	void SetAttackPower(float InNewAttackPower);
 	float GetAttackPower() const;
+
+	void SetAttackRange(int32 InNewAttackRange);
+	int32 GetAttackRange() const;
 
 	void SetHealthPoints(float InHealthPoints);
 	float GetHealthPoints() const;
@@ -37,6 +40,9 @@ public:
 
 	void MoveActorInterp(const FVector& InNewLocation, float InInterpTime_ms);
 
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category="Debug")
+	int32 GridPointIndex;
+
 protected:
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category="Mesh")
 	TObjectPtr<UStaticMeshComponent> StaticMeshComp;
@@ -47,11 +53,15 @@ protected:
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category="Mesh")
 	UMaterialInterface* BlueTeamMaterial;
 
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category="Debug")
 	ETeam Team;
-
-	FGridCoordinates GridCoordinates;
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category="Debug")
+	FIntPoint GridCoordinates;
+	
 
 	float AttackPower = 1.f;
+	int32 AttackRange = 1;
 	float Health = 1.f;
 	bool bIsAlive = true;
+	
 };

@@ -3,108 +3,10 @@
 
 #include "GameModes/IT_GameModeDefault.h"
 #include "Actors/IT_GameActorBase.h"
+#include "Grid/IT_GridTestActor.h"
+#include "Grid/IT_Pathfinder.h"
 #include "IlluviumTask/IlluviumTask.h"
 
-void FGrid::PrintGrid() const
-{
-	for (auto& Point : GridArray)
-	{
-		UE_LOG(LogTask, Display, TEXT("%s"), *Point.GetDebugString());
-	}
-}
-
-FString FGridPoint::GetDebugString() const
-{
-	const FString DebugString(TEXT("Index:%s, X:%s, Y:%s, Actor:%s, {0}, {1}, {2}, {3}"));
-	return FString::Format(*DebugString, {
-		                       *FString::FromInt(GridCoords.GridX * GridCoords.GridY),
-		                       *FString::FromInt(GridCoords.GridX), *FString::FromInt
-		                       (GridCoords.GridY),
-		                       *GetNameSafe(GameActor)
-	                       });
-}
-
-void FGrid::Init(int32 InSizeX, int32 InSizeY)
-{
-	SizeX = InSizeX;
-	SizeY = InSizeY;
-	//GridArray.Init(FGridPoint, SizeX * SizeY);
-	GridArray.SetNumZeroed(SizeX * SizeY);
-
-	for (int Rows = 0; Rows < SizeY; ++Rows)
-	{
-		for (int Cols = 0; Cols < SizeX; ++Cols)
-		{
-			FGridPoint& GridPoint = GridArray[Cols + Rows * SizeY];
-			GridPoint.GridCoords = FGridCoordinates{Cols, Rows};
-			UE_LOG(LogTask, Display, TEXT("Created point: %s"), *GridPoint.GetDebugString());
-		}
-	}
-	UE_LOG(LogTask, Display, TEXT("Number of Points: %s"), *FString::FromInt(GridArray.Num()));;
-}
-
-const TArray<FGridPoint>& FGrid::GetGrid() const
-{
-	return GridArray;
-}
-
-FGridPoint FGrid::At(int32 Index) const
-{
-	checkf(Index < GridArray.Num(), TEXT("[FGrid::At] Argument Index out of bounds."));
-	return GridArray[Index];
-}
-
-FGridPoint FGrid::At(FGridCoordinates Coordinates) const
-{
-	const int32 Index = Coordinates.GridX * Coordinates.GridY;
-	checkf(Index < GridArray.Num(), TEXT("[FGrid::At] Coordinates out of bounds."));
-
-	return GridArray[Index];
-}
-
-bool FGrid::FindRandomEmptyPointOnGrid(FGridPoint& OutGridPoint) const
-{
-	bool bResult = false;
-
-	const FGridPoint RandomPoint = FindRandomPointOnGrid();
-
-	// If the GridPoint is not empty
-	if (RandomPoint.GameActor != nullptr)
-	{
-		// Go heavy, copy all empty slots into temp grid copy and get random there.
-		TArray<FGridPoint> TempGrid = GridArray;
-		for (auto& Point : GridArray)
-		{
-			if (Point.GameActor != nullptr)
-			{
-				TempGrid.Add(Point);
-			}
-		}
-		if (TempGrid.Num() > 0)
-		{
-			OutGridPoint = TempGrid[FMath::RandRange(0, TempGrid.Num() - 1)];
-			bResult = true;
-		}
-		else
-		{
-			// The whole grid is occupied? Most probably, some sort of a error
-			OutGridPoint = FGridPoint();
-		}
-	}
-	else
-	{
-		OutGridPoint = RandomPoint;
-		bResult = true;
-	}
-
-	return bResult;
-}
-
-FGridPoint FGrid::FindRandomPointOnGrid() const
-{
-	checkf(GridArray.Num() > 0, TEXT("[FGrid::FindRandomPointOnGrid] Operation on an empty grid."));
-	return GridArray[FMath::RandRange(0, GridArray.Num() - 1)];
-}
 
 AIT_GameModeDefault::AIT_GameModeDefault(const FObjectInitializer& ObjectInitializer)
 	: Super(ObjectInitializer)
@@ -114,18 +16,38 @@ AIT_GameModeDefault::AIT_GameModeDefault(const FObjectInitializer& ObjectInitial
 
 	bStartPlayersAsSpectators = true;
 	ActorClass = AIT_GameActorBase::StaticClass();
+
+	//Pathfinder = MakeUnique<IT_Pathfinder>();
+	Pathfinder = MakePimpl<IT_Pathfinder>();
+}
+
+void AIT_GameModeDefault::TestGrid()
+{
+	for (auto& Point : Grid.GetGrid())
+	{
+		if (auto* const World = GetWorld())
+		{
+			FTransform SpawnTransform;
+			SpawnTransform.SetLocation(GridToGlobal(Point.GridCoords));
+			FActorSpawnParameters Params;
+			Params.SpawnCollisionHandlingOverride = ESpawnActorCollisionHandlingMethod::AlwaysSpawn;
+			AIT_GridTestActor* GridActor = World->SpawnActor<AIT_GridTestActor>(
+				GridActorDummyClass, SpawnTransform, Params);
+			GridActor->DebugText.Append(FString::FromInt(Point.Index)).Append("\n").Append(Point.GridCoords.ToString());
+		}
+	}
 }
 
 void AIT_GameModeDefault::PostInitializeComponents()
 {
 	Super::PostInitializeComponents();
 
-	Grid.Init(GridSizeX, GridSizeY);
-	//Grid.PrintGrid();
+	Grid.Init(GridSizeX, GridSizeY, EGridType::Rectangular);
 
-	SpawnActors();
-
-	StartSimulation();
+	if (Pathfinder.IsValid())
+	{
+		Pathfinder->InitGraph(Grid);
+	}
 }
 
 void AIT_GameModeDefault::Tick(float DeltaSeconds)
@@ -145,49 +67,103 @@ void AIT_GameModeDefault::Tick(float DeltaSeconds)
 	}
 }
 
+void AIT_GameModeDefault::BeginPlay()
+{
+	Super::BeginPlay();
+
+	SpawnActors();
+	StartSimulation();
+}
+
+void AIT_GameModeDefault::SpawnActorAt(TSubclassOf<AIT_GameActorBase> InActorClass, FIntPoint InGridPoint, ETeam InTeam)
+{
+	UWorld* World = GetWorld();
+	if (World == nullptr)
+	{
+		UE_LOG(LogTask, Warning, TEXT("[SpawnActorAt] World is nullptr."))
+		return;
+	}
+
+	AIT_GameActorBase* SpawnedActor = World->SpawnActorDeferred<AIT_GameActorBase>(
+		ActorClass,
+		FTransform(), nullptr, nullptr, ESpawnActorCollisionHandlingMethod::AlwaysSpawn);
+
+	SpawnedActor->SetTeam(InTeam);
+
+	SpawnedActor->SetAttackPower(FMath::RandRange(AttackPowerMin, AttackPowerMax));
+	SpawnedActor->SetHealthPoints(FMath::RandRange(HealthPointsMin, HealthPointsMax));
+
+	FGridPoint& GridPoint = Grid.At(InGridPoint);
+	GridPoint.GameActor = SpawnedActor;
+
+	FTransform SpawnTransform{};
+	SpawnTransform.SetLocation(GridToGlobal(GridPoint.GridCoords));
+
+	GridPoint.GameActor = SpawnedActor;
+	SpawnedActor->GridPointIndex = Grid.At(GridPoint.Index).Index;
+	SpawnedActor->SetGridCoordinates(InGridPoint);
+
+	SpawnedActor->FinishSpawning(SpawnTransform);
+
+	GameActors.Add(SpawnedActor);
+}
+
+void AIT_GameModeDefault::K2_StartSimulation()
+{
+	StartSimulation();
+}
 
 void AIT_GameModeDefault::SpawnActors()
 {
-	checkf(NumberOfActorsPerTeam > 0,
-	       TEXT("[AIT_GameModeDefault::SpawnActors] NumberOfActorsPerTeam is equal or less than zero."))
-
-	if (auto* const World = GetWorld())
+	UWorld* World = GetWorld();
+	if (!World)
 	{
-		for (int32 Index = 0; Index < NumberOfActorsPerTeam * NumberOfTeams; ++Index)
-		{
-			AIT_GameActorBase* SpawnedActor = World->SpawnActorDeferred<AIT_GameActorBase>(
-				ActorClass,
-				FTransform(), nullptr, nullptr, ESpawnActorCollisionHandlingMethod::AlwaysSpawn);
-
-			if (Index % 2)
-			{
-				SpawnedActor->SetTeam(ETeam::BlueTeam);
-			}
-			else
-			{
-				SpawnedActor->SetTeam(ETeam::RedTeam);
-			}
-			SpawnedActor->SetAttackPower(FMath::RandRange(AttackPowerMin, AttackPowerMax));
-			SpawnedActor->SetHealthPoints(FMath::RandRange(HealthPointsMin, HealthPointsMax));
-
-			FGridPoint GridPoint;
-			if (Grid.FindRandomEmptyPointOnGrid(GridPoint))
-			{
-				FTransform SpawnTransform{};
-				SpawnTransform.SetLocation(GridToGlobal(GridPoint.GridCoords));
-
-				GridPoint.GameActor = SpawnedActor;
-				SpawnedActor->SetGridCoordinates(GridPoint.GridCoords);
-				SpawnedActor->FinishSpawning(SpawnTransform);
-				GameActors.Add(SpawnedActor);
-			}
-			UE_LOG(LogTask, Display,
-			       TEXT("[AIT_GameModeDefault::SpawnActors] Created Actor: Team:%s, Health:%s, Attack:%s"),
-			       SpawnedActor->GetTeam() == ETeam::BlueTeam ? *FString("Blue") : *FString("Red"),
-			       *FString::SanitizeFloat(SpawnedActor->GetHealthPoints()),
-			       *FString::SanitizeFloat(SpawnedActor->GetAttackPower()));
-		}
+		UE_LOG(LogTask, Display, TEXT("[AIT_GameModeDefault::SpawnActors] World ptr is nullptr."));
+		return;
 	}
+
+	TArray<FGridPoint> SpawnLocations;
+	Grid.OnStartSpawningActors();
+	// Spawn actors
+	for (int32 Index = 0; Index < NumberOfActorsPerTeam * 2/*NumberOfTeams*/; ++Index)
+	{
+		// First create an actor and populate it with required gameplay information
+		AIT_GameActorBase* SpawnedActor = World->SpawnActorDeferred<AIT_GameActorBase>(
+			ActorClass,
+			FTransform(), nullptr, nullptr, ESpawnActorCollisionHandlingMethod::AlwaysSpawn);
+
+		SpawnedActor->SetTeam(Index % 2 ? ETeam::BlueTeam : ETeam::RedTeam);
+		SpawnedActor->SetAttackPower(FMath::RandRange(AttackPowerMin, AttackPowerMax));
+		SpawnedActor->SetHealthPoints(FMath::RandRange(HealthPointsMin, HealthPointsMax));
+
+		// Next, pass it to the Grid, or GridManager, or GridGenerator to register it on the grid
+		// if( bool bSuccessful = RegisterActor(SpawnedActor) )
+
+		//re-make FindRandomEmptyPointOnGrid to return an Index, I guess. Get Point ref by that point then
+		FGridPoint GridPoint;
+		Grid.FindRandomEmptyPointOnGrid(GridPoint);
+		FGridPoint& GridPointRef = Grid.At(GridPoint.Index);
+		if (GridPointRef.GameActor)
+		{
+			UE_LOG(LogTask, Display, TEXT("[AIT_GameModeDefault::SpawnActors] Received an occupied grid point."));
+		}
+		// Do Grid related stuff here.
+		GridPointRef.GameActor = SpawnedActor;
+		SpawnedActor->GridPointIndex = GridPointRef.Index;
+		SpawnedActor->SetGridCoordinates(GridPointRef.GridCoords);
+
+
+		// --
+		// Next, with an Actor registered on the Grid, it should know it's Grid coordinates.
+		// Use them to finalize the spawn
+		FTransform FinalTransform;
+		FinalTransform.SetLocation(GridToGlobal(SpawnedActor->GetGridCoordinates()));
+		SpawnedActor->FinishSpawning(FinalTransform);
+
+		++(ActorsNumPerTeam.FindOrAdd(SpawnedActor->GetTeam()));
+		GameActors.Add(SpawnedActor);
+	}
+	Grid.OnFinishSpawningActors();
 }
 
 void AIT_GameModeDefault::StartSimulation()
@@ -195,9 +171,29 @@ void AIT_GameModeDefault::StartSimulation()
 	bSimulationOngoing = true;
 }
 
+void AIT_GameModeDefault::EndSimulation()
+{
+	bSimulationOngoing = false;
+	UE_LOG(LogTask, Display, TEXT("[AIT_GameModeDefault::EndSimulation] Simulation is over."))
+}
+
+void AIT_GameModeDefault::IsSimulationOver()
+{
+	for (auto& TeamActorsNum : ActorsNumPerTeam)
+	{
+		// Technically we check, if any of teams is the only one that is left on the board.
+		if (TeamActorsNum.Value == GameActors.Num())
+		{
+			EndSimulation();
+			break;
+		}
+	}
+}
+
 void AIT_GameModeDefault::MakeSimulationTurn()
 {
 	// If there is just one, or even no Actors - cease the simulation
+	// TODO: remove or modify this condition into "CanStartSimultaionTurn" 
 	if (GameActors.Num() <= 1)
 	{
 		UE_LOG(LogTask, Display, TEXT("[AIT_GameModeDefault::MakeSimulationTurn] Simulation is over."))
@@ -209,10 +205,10 @@ void AIT_GameModeDefault::MakeSimulationTurn()
 	for (auto* Actor : GameActors)
 	{
 		// find closest
-		float Distance = 0.f;
-		if (auto* TargetActor = FindClosestActor(Actor, Distance))
+		int32 DistanceSqr = 0;
+		if (auto* TargetActor = FindClosestActor(Actor, DistanceSqr))
 		{
-			if (Distance - 1.f < UE_KINDA_SMALL_NUMBER)
+			if (DistanceSqr <= FMath::Square(Actor->GetAttackRange()))
 			{
 				ActorAttack(TargetActor, Actor);
 			}
@@ -228,14 +224,19 @@ void AIT_GameModeDefault::MakeSimulationTurn()
 		}
 	}
 
+	// Clean-up
 	for (auto* Actor : KilledGameActors)
 	{
 		GameActors.Remove(Actor);
 		Actor->StartDestroy();
 	}
+	KilledGameActors.Empty();
+
+	// Check simulation end conditions
+	IsSimulationOver();
 }
 
-AIT_GameActorBase* AIT_GameModeDefault::FindClosestActor(AIT_GameActorBase* InActor, float& OutDistance)
+AIT_GameActorBase* AIT_GameModeDefault::FindClosestActor(AIT_GameActorBase* InActor, int32& OutDistanceSqr)
 {
 	AIT_GameActorBase* TargetActor = nullptr;
 
@@ -245,8 +246,9 @@ AIT_GameActorBase* AIT_GameModeDefault::FindClosestActor(AIT_GameActorBase* InAc
 		return TargetActor;
 	}
 
-	float ClosestDist = -1.f;
+	int32 ClosestDist = -1;
 	AIT_GameActorBase* ClosestTarget = nullptr;
+	// TODO: upon adding new actors, put them into separate arrays, and iterate through the opponents array here.
 	for (auto* Actor : GameActors)
 	{
 		if (Actor == InActor || !Actor->IsAlive())
@@ -256,8 +258,8 @@ AIT_GameActorBase* AIT_GameModeDefault::FindClosestActor(AIT_GameActorBase* InAc
 
 		if (InActor->GetTeam() != Actor->GetTeam())
 		{
-			FGridCoordinates Diff = InActor->GetGridCoordinates() - Actor->GetGridCoordinates();
-			const float DistSqr = FGridCoordinates::DistSqr(InActor->GetGridCoordinates(), Actor->GetGridCoordinates());
+			FIntPoint Diff = InActor->GetGridCoordinates() - Actor->GetGridCoordinates();
+			const int32 DistSqr = FIntPoint(InActor->GetGridCoordinates() - Actor->GetGridCoordinates()).SizeSquared();
 
 			if ((ClosestDist < 0) || (DistSqr < ClosestDist))
 			{
@@ -266,7 +268,7 @@ AIT_GameActorBase* AIT_GameModeDefault::FindClosestActor(AIT_GameActorBase* InAc
 			}
 
 			// Maybe, this is a good idea to break as soon as we find an actor that is one square away from us.
-			if (DistSqr <= 1.f)
+			if (DistSqr <= 1)
 			{
 				break;
 			}
@@ -275,7 +277,7 @@ AIT_GameActorBase* AIT_GameModeDefault::FindClosestActor(AIT_GameActorBase* InAc
 
 	if (ClosestTarget != nullptr)
 	{
-		OutDistance = ClosestDist;
+		OutDistanceSqr = ClosestDist;
 	}
 
 	return ClosestTarget;
@@ -294,9 +296,40 @@ void AIT_GameModeDefault::ActorAttack(AIT_GameActorBase* InTargetActor, AIT_Game
 	InTargetActor->SetHealthPoints(InTargetActor->GetHealthPoints() - InActionActor->GetAttackPower());
 	if (InTargetActor->GetHealthPoints() <= 0.f)
 	{
-		InTargetActor->HandleZeroHealth();
-		KilledGameActors.Add(InTargetActor);
+		HandleActorKilled(InTargetActor, InActionActor);
 	}
+}
+
+FIntPoint AIT_GameModeDefault::GetNextMoveLocation(AIT_GameActorBase* InActionActor, AIT_GameActorBase* InTargetActor,
+                                                   const FGrid& InGrid)
+{
+	FIntPoint ResultPoint = FIntPoint::ZeroValue;
+
+	if (InTargetActor != nullptr)
+	{
+		FGridPoint CurrentGridPoint = InGrid.At(InActionActor->GetGridCoordinates());
+		const TArray<FGridPoint> NeighborPoints = Grid.GetNodeConnections(CurrentGridPoint);
+
+		int32 LeastDistance = FIntPoint(InTargetActor->GetGridCoordinates() - InActionActor->GetGridCoordinates()).
+			SizeSquared();
+
+		auto IsCloserThanBefore = [&LeastDistance](const FIntPoint& Left, const FIntPoint& Right)
+		{
+			return FIntPoint(Left - Right).SizeSquared() < LeastDistance;
+		};
+
+		for (const auto& Point : NeighborPoints)
+		{
+			const auto PointCoordinates = Point.GridCoords;
+			if (Point.GameActor == nullptr && IsCloserThanBefore(PointCoordinates, InTargetActor->GetGridCoordinates()))
+			{
+				LeastDistance = FIntPoint(PointCoordinates - InTargetActor->GetGridCoordinates()).SizeSquared();
+				ResultPoint = PointCoordinates;
+			}
+		}
+	}
+
+	return ResultPoint;
 }
 
 void AIT_GameModeDefault::ActorMoveTowards(AIT_GameActorBase* InTargetActor, AIT_GameActorBase* InActionActor)
@@ -304,39 +337,32 @@ void AIT_GameModeDefault::ActorMoveTowards(AIT_GameActorBase* InTargetActor, AIT
 	UE_LOG(LogTask, Display, TEXT("[AIT_GameModeDefault::ActorMove] Target: %s, ActionActor %s."),
 	       *GetNameSafe(InTargetActor), *GetNameSafe(InActionActor));
 
-	const FGridCoordinates Diff = InTargetActor->GetGridCoordinates() - InActionActor->GetGridCoordinates();
-	// To get rid of signs, we better operate with squared diff when we need to compare them
-	const FGridCoordinates DiffSqr(FMath::Square(Diff.GridX), FMath::Square(Diff.GridY));
-	FGridCoordinates NextMove;
-
-	// Use double negation to get an axis unit direction from the axis diff
-	// For an equal X and Y diff go for random axis direction
-	if (DiffSqr.GridX == DiffSqr.GridY)
+	if (InTargetActor == nullptr || InActionActor == nullptr)
 	{
-		FMath::RandBool() ? NextMove.GridX = 1 * FMath::Sign(Diff.GridX) : NextMove.GridY = 1 * FMath::Sign(Diff.GridY);
-	}
-	else if (DiffSqr.GridX > DiffSqr.GridY)
-	{
-		NextMove.GridX = 1 * FMath::Sign(Diff.GridX);
-	}
-	else
-	{
-		NextMove.GridY = 1 * FMath::Sign(Diff.GridY);
+		UE_LOG(LogTask, Warning, TEXT("[AIT_GameModeDefault::ActorMove] Nullptr is passed as an argument."));
+		return;
 	}
 
-	UE_LOG(LogTask, Display,
-	       TEXT(
-		       "[AIT_GameModeDefault::ActorMove] Target: %s is at %s,%s, ActionActor %s is at %s,%s. Move Difference: %s,%s"
-	       ),
-	       *GetNameSafe(InTargetActor), *FString::FromInt(InTargetActor->GetGridCoordinates().GridX),
-	       *FString::FromInt(InTargetActor->GetGridCoordinates().GridY),
-	       *GetNameSafe(InActionActor), *FString::FromInt(InActionActor->GetGridCoordinates().GridX),
-	       *FString::FromInt(InActionActor->GetGridCoordinates().GridY),
-	       *FString::FromInt(NextMove.GridX), *FString::FromInt(NextMove.GridY));
+	FIntPoint NextMove = GetNextMoveLocation(InActionActor, InTargetActor, Grid);
+	// Alternatively, use pathfinding, if the grid will have obstacles:
+	//auto DummyPath = Pathfinder->FindPath(Path::FNode(InActionActor->GetGridCoordinates()),
+	//                                      Path::FNode(InTargetActor->GetGridCoordinates()));
+	//if(DummyPath.Num() > 0)
+	//{
+	//	NextMove = (*DummyPath.begin()).XY;
+	//}
+	
 
-	NextMove.GridX += InActionActor->GetGridCoordinates().GridX;
-	NextMove.GridY += InActionActor->GetGridCoordinates().GridY;
+	if (NextMove == FIntPoint::ZeroValue)
+	{
+		UE_LOG(LogTask, Warning, TEXT("[AIT_GameModeDefault::ActorMove] Failed to find a point closer"));
+		return;
+	}
+
+	// Clear current point on grid, then assign new coordinates to the actor and assign the actor to the new grid point
+	Grid.At(InActionActor->GetGridCoordinates()).GameActor = nullptr;
 	InActionActor->SetGridCoordinates(NextMove);
+	Grid.At(NextMove).GameActor = InActionActor;
 
 
 	// TODO: fix the lerp first. Then delete the SetActorLocation call.
@@ -349,13 +375,13 @@ void AIT_GameModeDefault::HandleActorKilled(AIT_GameActorBase* InTargetActor, AI
 	UE_LOG(LogTask, Warning, TEXT("[AIT_GameModeDefault::HandleActorKilled] %s is killed by %s."),
 	       *GetNameSafe(InTargetActor), *GetNameSafe(InInstigatorActor));
 
-	// Remove actor form the array
-	// Clear actor's grid point
-	// Trigger actor's BeginDeath 
-	// what else?
+	InTargetActor->HandleZeroHealth();
+	Grid.At(InTargetActor->GetGridCoordinates()).GameActor = nullptr;
+	KilledGameActors.Add(InTargetActor);
+	--ActorsNumPerTeam.FindOrAdd(InTargetActor->GetTeam());
 }
 
-FVector AIT_GameModeDefault::GridToGlobal(const FGridCoordinates& InCoordinates) const
+FVector AIT_GameModeDefault::GridToGlobal(const FIntPoint& InCoordinates) const
 {
-	return FVector{InCoordinates.GridX * GridCellSize, InCoordinates.GridY * GridCellSize, 0.f};
+	return FVector{InCoordinates.X * GridCellSize, InCoordinates.Y * GridCellSize, 0.f};
 }

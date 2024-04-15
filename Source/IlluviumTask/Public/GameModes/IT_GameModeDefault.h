@@ -5,78 +5,11 @@
 #include "CoreMinimal.h"
 #include "GameFramework/GameModeBase.h"
 #include "StaticData.h"
+#include "Grid/IT_Grid.h"
 #include "IT_GameModeDefault.generated.h"
 
-/**
- * The struct to represent a grid element.
- */
-USTRUCT()
-struct FGridPoint
-{
-	GENERATED_BODY()
 
-	FGridCoordinates GridCoords;
-	float Weight = 0.f;
-
-	TObjectPtr<class AIT_GameActorBase> GameActor = nullptr;
-
-	FString GetDebugString() const;
-};
-
-/**
- * The struct (but rather a class already) to represent the grid.
- */
-USTRUCT()
-struct FGrid
-{
-	GENERATED_BODY()
-	;
-
-	/**
-	 * Init Grid
-	 * @param InSizeX Size of the X side of the Grid 
-	 * @param InSizeY Size of the Y side of the Grid
-	 */
-	void Init(int32 InSizeX, int32 InSizeY);
-
-	void PrintGrid() const;
-
-	/**
-	 * A getter for the Grid Array
-	 * @return GridArray
-	 */
-	const TArray<FGridPoint>& GetGrid() const;
-
-	/**
-	 * Get Grid element at index
-	 * @param Index Element index
-	 * @return Element at index
-	 */
-	FGridPoint At(int32 Index) const;
-
-	/**
-	 * Get Grid element by coordinates
-	 * @param Coordinates Element coordinates
-	 * @return Element at coordinates
-	 */
-	FGridPoint At(FGridCoordinates Coordinates) const;
-
-	/**
-	* @return Returns a random position on Grid that is not yet occupied
-	*/
-	bool FindRandomEmptyPointOnGrid(FGridPoint& OutGridPoint) const;
-
-	/**
-	* @return Returns a random position on Grid
-	*/
-	FGridPoint FindRandomPointOnGrid() const;
-
-private:
-	TArray<FGridPoint> GridArray;
-	int32 SizeX = 0;
-	int32 SizeY = 0;
-};
-
+class AIT_GridTestActor;
 /**
  * 
  */
@@ -91,6 +24,13 @@ public:
 	virtual void PostInitializeComponents() override;
 
 	virtual void Tick(float DeltaSeconds) override;
+	
+	virtual void BeginPlay() override;
+
+	void SpawnActorAt(TSubclassOf<AIT_GameActorBase> ActorClass, FIntPoint GridPoint, ETeam Team);
+
+	UFUNCTION(BlueprintCallable)
+	void K2_StartSimulation();
 	
 protected:
 	
@@ -119,6 +59,10 @@ protected:
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category="GameSettings")
 	TSubclassOf<AIT_GameActorBase> ActorClass;
 
+	// The subclass to be used for the simulation. It's just a single class at the moment tho
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category="GameSettings")
+	TSubclassOf<AIT_GridTestActor> GridActorDummyClass;
+	
 	// Minimum Attack power that will be used for random AttackPower setup
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category="GameSettings|ActorsSetting|Attack")
 	float AttackPowerMin = 1.f;
@@ -146,6 +90,13 @@ private:
 	 * Starts the simulation
 	 */
 	void StartSimulation();
+
+	/**
+	 * Ends the simulation
+	 */
+	void EndSimulation(/*EReason*/);
+	void IsSimulationOver();
+
 	/**
 	 * Or rather a Step, not a turn.. A simulation iteration functional unit.
 	 */
@@ -154,13 +105,14 @@ private:
 	/**
 	 * Find the closest opponent
 	 * @param InActor An actor to look opponents for
-	 * @param OutDistance Distance to the found opponent 
+	 * @param OutDistanceSqr Square distance to the found opponent 
 	 * @return Pointer to the found opponent
 	 */
-	AIT_GameActorBase* FindClosestActor(AIT_GameActorBase* InActor, float& OutDistance);
+	AIT_GameActorBase* FindClosestActor(AIT_GameActorBase* InActor, int32& OutDistanceSqr);
 	
 	void ActorAttack(AIT_GameActorBase* InTargetActor, AIT_GameActorBase* InInstigatorActor);
 
+	FIntPoint GetNextMoveLocation(AIT_GameActorBase* InActionActor, AIT_GameActorBase* InTargetActor, const FGrid& InGrid);
 	void ActorMoveTowards(AIT_GameActorBase* InTargetActor, AIT_GameActorBase* InInstigatorActor);
 
 	void HandleActorKilled(AIT_GameActorBase* InTargetActor, AIT_GameActorBase* InInstigatorActor);
@@ -171,11 +123,18 @@ private:
 	 * @param GridY Grid Y coordinate
 	 * @return Global Coordinates
 	 */
-	FVector GridToGlobal(const FGridCoordinates& GridCoordinates ) const;
+	FVector GridToGlobal(const FIntPoint& GridCoordinates ) const;
+
+	/**
+	 * Spawns info actors at each Grid cell
+	 */
+	void TestGrid();
 
 	// TODO: Move it to GameState.
 	// An array of Game Actors.
 	TArray<class AIT_GameActorBase*> GameActors;
+
+	TMap<ETeam, int32> ActorsNumPerTeam;
 
 	// An array of Game Actors pending to be destroyed.
 	TArray<class AIT_GameActorBase*> KilledGameActors;
@@ -188,4 +147,6 @@ private:
 
 	// A counter to accumulate delta time from ticks to simulate TimeSteps
 	float TimeStepAccumulator = 0.f;
+
+	TPimplPtr<class IT_Pathfinder> Pathfinder;
 };

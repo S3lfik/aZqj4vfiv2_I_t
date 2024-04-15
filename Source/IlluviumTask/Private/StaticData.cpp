@@ -1,27 +1,27 @@
 ﻿#include "StaticData.h"
 
 
-FGridCoordinates::FGridCoordinates()
+FGridCoordinates_Dep::FGridCoordinates_Dep()
 	: GridX(0), GridY(0)
 {}
 
-FGridCoordinates::FGridCoordinates(int32 X, int32 Y)
+FGridCoordinates_Dep::FGridCoordinates_Dep(int32 X, int32 Y)
 {
 	GridX = X;
 	GridY = Y;
 }
 
-bool FGridCoordinates::operator==(const FGridCoordinates& InCoordinates) const
+bool FGridCoordinates_Dep::operator==(const FGridCoordinates_Dep& InCoordinates) const
 {
 	return (GridX == InCoordinates.GridX) && (GridY == InCoordinates.GridY);
 }
 
-FGridCoordinates FGridCoordinates::operator-(const FGridCoordinates& InCoordinates) const
+FGridCoordinates_Dep FGridCoordinates_Dep::operator-(const FGridCoordinates_Dep& InCoordinates) const
 {
-	return FGridCoordinates{this->GridX - InCoordinates.GridX, this->GridY - InCoordinates.GridY};
+	return FGridCoordinates_Dep{this->GridX - InCoordinates.GridX, this->GridY - InCoordinates.GridY};
 }
 
-FString FGridCoordinates::ToString() const
+FString FGridCoordinates_Dep::ToString() const
 {
 	const FString DebugString(TEXT("X:{0}, Y:{1}"));
 	return FString::Format(*DebugString, {	*FString::FromInt(GridX), *FString::FromInt(GridY)});
